@@ -1,0 +1,46 @@
+# --- Project Specific ---
+# Ignore data and media as requested
+data/
+media/
+
+# --- Go (Golang) ---
+# Binaries and tool objects
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Main binary (assuming you name it after the project or use 'main')
+main
+server
+
+# Go workspace file
+go.work
+
+# --- Docker ---
+# Ignore local env files that might contain secrets
+.env
+*.env
+
+# If you use Docker Compose local overrides
+docker-compose.override.yml
+
+# --- Editor & OS ---
+# Neovim / Vim swap files
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-v][a-z]
+[._]sw[a-p]
+Session.vim
+.netrwhist
+
+# macOS specific
+.DS_Store
+
+# Windows specific
+Thumbs.db
+
+# --- Logs ---
+*.log
