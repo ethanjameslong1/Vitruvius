@@ -1,0 +1,13 @@
+services:
+  db:
+    image: crate:latest
+    ports:
+      - "4200:4200"
+      - "5432:5432"
+    volumes:
+      - crate_data:/data # This ensures your data survives a restart
+    environment:
+      - CRATE_HEAP_SIZE=2g
+
+volumes:
+  crate_data:

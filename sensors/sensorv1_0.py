@@ -1,48 +1,54 @@
-from os import wait
 import pandas as pd
 import time
-import gzip
+import requests
 
 file = "../data/AoT_Chicago.complete.2022-08-31/data.csv.gz"
 
 
 def stream_data(data):
-    print(data)
-    print("\n\n")
+    requests.post("http://localhost:8000/data", json=data)
 
 
-chunkIter = pd.read_csv(file, compression="gzip", chunksize=1)
+chunkIter = pd.read_csv(file, compression="gzip", chunksize=1000)
 t_last = None
 data = []
-for i, chunk in enumerate(chunkIter):
-    current_time = pd.to_datetime(chunk["timestamp"].iloc[0])
-    if t_last == None:
+i = 0
+for chunk in chunkIter:
+    for index, row in chunk.iterrows():
+        clean_row = row.where(pd.notnull(row), None).to_dict()
+        current_time = pd.to_datetime(clean_row["timestamp"])
+        if t_last == None:
+            t_last = current_time
+            data.append(clean_row)
+            continue
+
+        if i > 2000:
+            break
+        else:
+            i += 1
+
+        if t_last == current_time:
+            data.append(clean_row)
+            continue
+
+        elif t_last < current_time:
+            tdelta = current_time - t_last
+            wait_time = tdelta.total_seconds()
+
+            send_time = time.time()
+            stream_data(data)
+            lostTime = time.time() - send_time
+            wait_time -= lostTime
+
+            data = []
+            data.append(clean_row)
+            print(f"SLEEPING NOW: {wait_time}")
+            if wait_time > 0:
+                time.sleep(wait_time)
+        else:
+            print("Smaller time??? Bad news")
+            data.append(clean_row)
         t_last = current_time
-        data.append(chunk.iloc[0].to_dict())
-        continue
-
-    if i > 500:
-        break
-
-    if t_last == current_time:
-        data.append(chunk.iloc[0].to_dict())
-        continue
-
-    elif t_last < current_time:
-        tdelta = current_time - t_last
-        wait_time = tdelta.total_seconds()
-
-        send_time = time.time()
-        stream_data(data)
-        lostTime = time.time() - send_time
-
-        data = []
-        data.append(chunk.iloc[0].to_dict())
-        print(f"SLEEPING NOW: {wait_time}")
-        time.sleep(max(0, wait_time - lostTime))
-    else:
-        print("Smaller time??? Bad news")
-    t_last = current_time
 
 
 """
