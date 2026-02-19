@@ -6,35 +6,31 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
-	_ "github.com/lib/pq" // Use the Postgres driver
+	_ "github.com/lib/pq"
 )
 
 type SensorData struct {
-	Timestamp string `json:"timestamp"`
-	NodeID    string `json:"node_id"`
-	Subsystem string `json:"subsystem"`
-	Sensor    string `json:"sensor"`
-	Parameter string `json:"parameter"`
-	ValueRaw  string `json:"value_raw"`
-	ValueHrf  string `json:"value_hrf"`
+	Timestamp string  `json:"timestamp"`
+	NodeID    string  `json:"node_id"`
+	Subsystem string  `json:"subsystem"`
+	Sensor    string  `json:"sensor"`
+	Parameter string  `json:"parameter"`
+	ValueRaw  float64 `json:"value_raw"`
+	ValueHrf  float64 `json:"value_hrf"`
 }
 
 func insertRecord(db *sql.DB, d SensorData) error {
-	layout := "2006/01/02 15:04:05"
+	layout := "2006-01-02 15:04:05"
 	parsedTime, err := time.Parse(layout, d.Timestamp)
 	if err != nil {
-		return fmt.Errorf("could not parse timestamp '%s': %v", d.Timestamp, err)
+		log.Printf("could not parse timestamp '%s': %v", d.Timestamp, err)
 	}
 
 	query := `INSERT INTO rawsensordata 
 		(timestamp, node_id, subsystem, sensor, parameter, valueRaw, valueHrf) 
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-
-	vRaw, _ := strconv.ParseFloat(d.ValueRaw, 64)
-	vHrf, _ := strconv.ParseFloat(d.ValueHrf, 64)
 
 	_, err = db.Exec(query,
 		parsedTime,
@@ -42,10 +38,9 @@ func insertRecord(db *sql.DB, d SensorData) error {
 		d.Subsystem,
 		d.Sensor,
 		d.Parameter,
-		vRaw,
-		vHrf,
+		d.ValueRaw,
+		d.ValueHrf,
 	)
-	fmt.Printf("Error if exists: %v", err)
 	return err
 }
 
@@ -61,7 +56,11 @@ func listen(db *sql.DB) {
 		if len(data) > 0 {
 			log.Printf("Received %d records.", len(data))
 			for _, dat := range data {
-				insertRecord(db, dat)
+				fmt.Printf("Inserting data: %+v", dat)
+				err := insertRecord(db, dat)
+				if err != nil {
+					log.Printf("ERROR INSERTING: %v", err)
+				}
 			}
 
 			w.WriteHeader(http.StatusOK)
