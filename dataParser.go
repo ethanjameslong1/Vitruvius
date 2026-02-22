@@ -54,12 +54,12 @@ func listen(db *sql.DB) {
 			return
 		}
 		if len(data) > 0 {
-			log.Printf("Received %d records.", len(data))
+			log.Printf("Received %d records.\n", len(data))
 			for _, dat := range data {
-				fmt.Printf("Inserting data: %+v", dat)
+				fmt.Printf("Inserting data: %+v\n", dat)
 				err := insertRecord(db, dat)
 				if err != nil {
-					log.Printf("ERROR INSERTING: %v", err)
+					log.Printf("ERROR INSERTING: %v\n", err)
 				}
 			}
 
