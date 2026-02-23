@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/kshedden/formula"
+	"github.com/kshedden/statmodel/glm"
 	_ "github.com/lib/pq"
 )
 
@@ -32,14 +35,15 @@ func main() {
 	if err != nil {
 		log.Printf("Error Connecting to DB: %v", err)
 	}
-	rainData, err := getRecords(db)
+	humData, preData, err := getRecords(db)
 	if err != nil {
 		log.Printf("Error Connecting to DB: %v", err)
 	}
+	// fmt.Printf("hum Data: %v\npre Data: %v\n", humData, preData)
 	nodeMap := makeNodeMap()
 	dayRainMap := make(map[string][]float64)
 
-	for _, rData := range rainData {
+	for _, rData := range preData {
 
 		coord := nodeMap[rData.NodeID]
 
@@ -60,7 +64,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error making request: %v", err)
 		}
-
 		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
@@ -81,8 +84,132 @@ func main() {
 		if !ok {
 			dayRainMap[day] = result.Hourly.Rain
 		}
-
 	}
+
+	type observation struct {
+		humidity float64
+		pressure float64
+	}
+
+	syncMap := make(map[string]*observation)
+
+	for _, h := range humData {
+		key := h.Time.Format("2006-01-02-15:04:05")
+		val, _ := strconv.ParseFloat(h.Valuehrf, 64)
+		syncMap[key] = &observation{humidity: val}
+	}
+	for _, p := range preData {
+		key := p.Time.Format("2006-01-02-15:04:05")
+		if obs, ok := syncMap[key]; ok {
+			val, _ := strconv.ParseFloat(p.Valuehrf, 64)
+			obs.pressure = val
+		}
+	}
+
+	var hum []float64
+	var pre []float64
+	var isRain []float64
+
+	for key, obs := range syncMap {
+		if obs.pressure != 0 && obs.humidity != 0 {
+			date := key[:10]
+			hour, _ := strconv.Atoi(key[11:13])
+			rainVal := 0.0
+			if _, ok := dayRainMap[date]; !ok {
+				continue
+			} else {
+				if dayRainMap[date][hour] > 0 {
+					rainVal = 1.0
+				}
+				hum = append(hum, obs.humidity)
+				pre = append(pre, obs.pressure)
+				isRain = append(isRain, rainVal)
+			}
+		}
+	}
+	for _, va := range isRain {
+		if va == 1.0 {
+			fmt.Printf("%v, ", va)
+		}
+	}
+
+	standardize(hum)
+	standardize(pre)
+
+	runRainModel(hum, pre, isRain)
+}
+
+func standardize(data []float64) []float64 {
+	var sum, ssq float64
+	n := float64(len(data))
+	for _, v := range data {
+		sum += v
+	}
+	mean := sum / n
+	for _, v := range data {
+		ssq += math.Pow(v-mean, 2)
+	}
+	std := math.Sqrt(ssq / n)
+
+	res := make([]float64, len(data))
+	for i, v := range data {
+		res[i] = (v - mean) / std
+	}
+	return res
+}
+
+func runRainModel(hum, pre, isRain []float64) {
+	// 1. Prepare names and data interface slice
+	names := []string{"humidity", "pressure", "isRain"}
+
+	// The formula package expects an []interface{} where each element
+	// is a slice (either []float64 for numeric or []string for categorical)
+	datax := []interface{}{
+		hum,
+		pre,
+		isRain,
+	}
+
+	// 2. Create the compliant DataSource
+	rainSource := formula.NewSource(datax, names)
+
+	msg := "Logistic regression: Predicting rain using humidity and pressure."
+
+	// 3. Define the Formula
+	// isRain is the dependent variable; 1 is the intercept
+	fml := []string{"isRain", "1 + humidity + pressure"}
+
+	f, err := formula.NewMulti(fml, rainSource, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	da, err := f.Parse()
+	if err != nil {
+		panic(err)
+	}
+	da = da.DropNA()
+
+	// 4. Configure GLM
+	xnames := []string{"icept", "humidity", "pressure"}
+	c := glm.DefaultConfig()
+	c.Family = glm.NewFamily(glm.BinomialFamily) // Logistic regression
+
+	model, err := glm.NewGLM(da, "isRain", xnames, c)
+	if err != nil {
+		panic(err)
+	}
+
+	// 5. Fit and Print Results
+	rslt := model.Fit()
+	smry := rslt.Summary()
+
+	fmt.Printf("\n%s\n", msg)
+	fmt.Printf(smry.String() + "\n\n")
+
+	// Show as Odds Ratios for easier interpretation
+	smry = smry.SetScale(math.Exp, "Parameters are shown as odds ratios")
+	fmt.Printf(smry.String() + "\n\n")
 }
 
 func dbConnect() (*sql.DB, error) {
@@ -95,9 +222,10 @@ func dbConnect() (*sql.DB, error) {
 	return db, err
 }
 
-func getRecords(db *sql.DB) ([]rainData, error) {
-	query := `SELECT node_id, parameter, valuehrf, timestamp FROM rawsensordata limit 100;`
-	var res []rainData
+func getRecords(db *sql.DB) ([]rainData, []rainData, error) {
+	query := `SELECT node_id, parameter, valuehrf, timestamp FROM rawsensordata WHERE parameter IN ('humidity', 'pressure') ORDER BY timestamp ASC limit 50000;`
+	var preRes []rainData
+	var humRes []rainData
 
 	var d rainData
 
@@ -112,18 +240,17 @@ func getRecords(db *sql.DB) ([]rainData, error) {
 		if err != nil {
 			log.Printf("Error scanning row: %v", err)
 		}
-		res = append(res, d)
+		if d.Param == "humidity" {
+			humRes = append(humRes, d)
+		} else if d.Param == "pressure" {
+			preRes = append(preRes, d)
+		}
 	}
-
 	if err = r.Err(); err != nil {
-		return res, err
+		return nil, nil, err
 	}
 
-	return res, nil
-}
-
-func findNodeCoords(nodeID string) (float32, float32) {
-	return 6.9, 6.9
+	return humRes, preRes, nil
 }
 
 func makeNodeMap() map[string]Coordinate {

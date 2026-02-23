@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -19,6 +20,73 @@ type SensorData struct {
 	Parameter string  `json:"parameter"`
 	ValueRaw  float64 `json:"value_raw"`
 	ValueHrf  float64 `json:"value_hrf"`
+}
+
+func insertBatch(db *sql.DB, data []SensorData) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	valueStrings := make([]string, 0, len(data))
+	valueArgs := make([]interface{}, 0, len(data)*7)
+	layout := "2006-01-02 15:04:05"
+
+	for i, d := range data {
+		parsedTime, err := time.Parse(layout, d.Timestamp)
+		if err != nil {
+			log.Printf("could not parse timestamp '%s': %v", d.Timestamp, err)
+		}
+
+		pIdx := i * 7
+
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			pIdx+1, pIdx+2, pIdx+3, pIdx+4, pIdx+5, pIdx+6, pIdx+7))
+
+		valueArgs = append(valueArgs,
+			parsedTime,
+			d.NodeID,
+			d.Subsystem,
+			d.Sensor,
+			d.Parameter,
+			d.ValueRaw,
+			d.ValueHrf,
+		)
+	}
+
+	query := fmt.Sprintf(`INSERT INTO rawsensordata 
+		(timestamp, node_id, subsystem, sensor, parameter, valueRaw, valueHrf) 
+		VALUES %s`, strings.Join(valueStrings, ","))
+
+	_, err := db.Exec(query, valueArgs...)
+	return err
+}
+
+func listen(db *sql.DB) {
+	dataHandler := func(w http.ResponseWriter, req *http.Request) {
+		var data []SensorData
+		err := json.NewDecoder(req.Body).Decode(&data)
+		if err != nil {
+			log.Printf("error found decoding JSON: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if len(data) > 0 {
+			err := insertBatch(db, data)
+			if err != nil {
+				log.Printf("ERROR BATCH INSERTING: %v\n", err)
+				http.Error(w, "Database error", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		} else {
+			log.Printf("Data payload was empty")
+			w.WriteHeader(http.StatusOK)
+		}
+	}
+
+	http.HandleFunc("/data", dataHandler)
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
 func insertRecord(db *sql.DB, d SensorData) error {
@@ -42,35 +110,6 @@ func insertRecord(db *sql.DB, d SensorData) error {
 		d.ValueHrf,
 	)
 	return err
-}
-
-func listen(db *sql.DB) {
-	dataHandler := func(w http.ResponseWriter, req *http.Request) {
-		var data []SensorData
-		err := json.NewDecoder(req.Body).Decode(&data)
-		if err != nil {
-			log.Printf("error found, but something happened! %v", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if len(data) > 0 {
-			log.Printf("Received %d records.\n", len(data))
-			for _, dat := range data {
-				fmt.Printf("Inserting data: %+v\n", dat)
-				err := insertRecord(db, dat)
-				if err != nil {
-					log.Printf("ERROR INSERTING: %v\n", err)
-				}
-			}
-
-			w.WriteHeader(http.StatusOK)
-		} else {
-			log.Printf("Data is less nothing somehow")
-			w.WriteHeader(http.StatusOK)
-		}
-	}
-	http.HandleFunc("/data", dataHandler)
-	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
 func dbSetup() (*sql.DB, error) {

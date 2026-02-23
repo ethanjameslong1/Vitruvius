@@ -12,19 +12,26 @@ import requests
 # print(df_sample)
 # **************************************************************8
 
+TARGET_HUM_NODE = "001e0610ba13"
+TARGET_PRE_NODE = "001e0610eef4"
+
 
 # **************************************************************8
 def stream_data(data):
     requests.post("http://localhost:8000/data", json=data)
 
 
-def read_from_file(file):
+def read_from_file(file, target_node):
     chunkIter = pd.read_csv(file, compression="gzip", chunksize=1000)
     t_last = None
     data = []
     i = 0
     for chunk in chunkIter:
-        for index, row in chunk.iterrows():
+        i += 1
+        if i % 3 != 0:
+            continue
+        filtered_chunk = chunk[chunk["node_id"] == target_node]
+        for _, row in filtered_chunk.iterrows():
             clean_row = row.where(pd.notnull(row), None).to_dict()
             current_time = pd.to_datetime(clean_row["data.csv"])
             c_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -35,16 +42,13 @@ def read_from_file(file):
                 data.append(clean_row)
                 continue
 
-            if i > 2000:
-                break
-            else:
-                i += 1
-
-            if t_last == current_time:
+            # if t_last == current_time:
+            if len(data) <= 50:
                 data.append(clean_row)
                 continue
 
-            elif t_last < current_time:
+            # elif t_last < current_time:
+            elif len(data) > 50:
                 tdelta = current_time - t_last
                 wait_time = tdelta.total_seconds()
 
@@ -55,9 +59,10 @@ def read_from_file(file):
 
                 data = []
                 data.append(clean_row)
-                print(f"SLEEPING NOW: {wait_time}")
-                if wait_time > 0:
-                    time.sleep(wait_time)
+                # print(f"SLEEPING NOW: {wait_time}")
+                # if wait_time > 0:
+                # print("NOT SLEEPING LOL")
+                # time.sleep(wait_time)
             else:
                 print("Smaller time??? Bad news")
                 data.append(clean_row)
@@ -70,8 +75,8 @@ def read_from_file(file):
 fileHum = "../data/AoT_Chicago.complete.humidity/data.csv.gz"
 filePres = "../data/AoT_Chicago.complete.pressure/data.csv.gz"
 
-t1 = threading.Thread(target=read_from_file, args=(fileHum,))
-t2 = threading.Thread(target=read_from_file, args=(filePres,))
+t1 = threading.Thread(target=read_from_file, args=(fileHum, TARGET_HUM_NODE))
+t2 = threading.Thread(target=read_from_file, args=(filePres, TARGET_PRE_NODE))
 
 t1.start()
 t2.start()
