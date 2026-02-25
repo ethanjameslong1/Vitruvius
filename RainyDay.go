@@ -159,24 +159,18 @@ func standardize(data []float64) []float64 {
 }
 
 func runRainModel(hum, pre, isRain []float64) {
-	// 1. Prepare names and data interface slice
 	names := []string{"humidity", "pressure", "isRain"}
 
-	// The formula package expects an []interface{} where each element
-	// is a slice (either []float64 for numeric or []string for categorical)
 	datax := []interface{}{
 		hum,
 		pre,
 		isRain,
 	}
 
-	// 2. Create the compliant DataSource
 	rainSource := formula.NewSource(datax, names)
 
 	msg := "Logistic regression: Predicting rain using humidity and pressure."
 
-	// 3. Define the Formula
-	// isRain is the dependent variable; 1 is the intercept
 	fml := []string{"isRain", "1 + humidity + pressure"}
 
 	f, err := formula.NewMulti(fml, rainSource, nil)
@@ -190,24 +184,21 @@ func runRainModel(hum, pre, isRain []float64) {
 	}
 	da = da.DropNA()
 
-	// 4. Configure GLM
 	xnames := []string{"icept", "humidity", "pressure"}
 	c := glm.DefaultConfig()
-	c.Family = glm.NewFamily(glm.BinomialFamily) // Logistic regression
+	c.Family = glm.NewFamily(glm.BinomialFamily)
 
 	model, err := glm.NewGLM(da, "isRain", xnames, c)
 	if err != nil {
 		panic(err)
 	}
 
-	// 5. Fit and Print Results
 	rslt := model.Fit()
 	smry := rslt.Summary()
 
 	fmt.Printf("\n%s\n", msg)
 	fmt.Printf(smry.String() + "\n\n")
 
-	// Show as Odds Ratios for easier interpretation
 	smry = smry.SetScale(math.Exp, "Parameters are shown as odds ratios")
 	fmt.Printf(smry.String() + "\n\n")
 }

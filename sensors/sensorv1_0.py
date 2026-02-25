@@ -42,12 +42,13 @@ def read_from_file(file, target_node):
                 data.append(clean_row)
                 continue
 
-            # if t_last == current_time:
+            # if t_last == current_time: ** THIS IS FOR USING IT AS A LIVE SENSOR
             if len(data) <= 50:
                 data.append(clean_row)
                 continue
 
-            # elif t_last < current_time:
+            # elif t_last < current_time: ** THIS IS FOR USING IT AS A LIVE SENSOR
+
             elif len(data) > 50:
                 tdelta = current_time - t_last
                 wait_time = tdelta.total_seconds()
@@ -59,10 +60,10 @@ def read_from_file(file, target_node):
 
                 data = []
                 data.append(clean_row)
-                # print(f"SLEEPING NOW: {wait_time}")
-                # if wait_time > 0:
-                # print("NOT SLEEPING LOL")
-                # time.sleep(wait_time)
+                # print(f"SLEEPING NOW: {wait_time}") ** THIS IS FOR USING IT AS A LIVE SENSOR
+                # if wait_time > 0: ** THIS IS FOR USING IT AS A LIVE SENSOR
+                # time.sleep(wait_time) ** THIS IS FOR USING IT AS A LIVE SENSOR
+
             else:
                 print("Smaller time??? Bad news")
                 data.append(clean_row)

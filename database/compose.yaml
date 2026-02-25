@@ -1,3 +1,5 @@
+Just an example of the data base I've been using. I use the docker CLI though.
+
 services:
   db:
     image: crate:latest
